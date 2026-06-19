@@ -35,6 +35,10 @@ from transformers import PreTrainedTokenizerFast
 
 from sglang_omni.models.higgs_tts.model_runner import HiggsTTSModelRunner
 from sglang_omni.models.higgs_tts.payload_types import HiggsTtsState
+from sglang_omni.models.higgs_tts.pretokenized import (
+    build_pretokenized_state,
+    is_pretokenized_prompt,
+)
 from sglang_omni.models.higgs_tts.request_builders import make_higgs_scheduler_adapters
 from sglang_omni.models.higgs_tts.text_tokenizer import HiggsTokenizerAdapter
 from sglang_omni.models.higgs_tts.utils import (
@@ -185,8 +189,22 @@ def create_preprocessing_executor(
     speaker_cache = get_speaker_artifact_cache()
 
     def _preprocess(payload: StagePayload) -> StagePayload:
-        inputs = payload.request.inputs or {}
+        raw_inputs = payload.request.inputs
         params = payload.request.params or {}
+
+        # RL rollout sends pre-tokenized prompt ids; run them verbatim, bypassing the
+        # text tokenizer and reference-audio assembly so rollout and training tokens match.
+        if is_pretokenized_prompt(raw_inputs):
+            state = build_pretokenized_state(
+                raw_inputs,
+                params,
+                num_codebooks=num_codebooks,
+                codebook_size=codebook_size,
+            )
+            payload.data = state.to_dict()
+            return payload
+
+        inputs = raw_inputs or {}
         if isinstance(inputs, str):
             inputs = {"text": inputs}
 
