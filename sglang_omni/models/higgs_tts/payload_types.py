@@ -46,6 +46,9 @@ class HiggsTtsState:
     audio_samples: Any | None = None
     sample_rate: int = 24000
 
+    # rollout
+    output_token_logprobs: list[Any] | None = None
+
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "prompt_token_ids": list(self.prompt_token_ids),
@@ -81,6 +84,8 @@ class HiggsTtsState:
         if self.audio_samples is not None:
             data["audio_samples"] = self.audio_samples
             data["sample_rate"] = self.sample_rate
+        if self.output_token_logprobs is not None:
+            data["output_token_logprobs"] = self.output_token_logprobs
         return data
 
     @classmethod
@@ -107,6 +112,7 @@ class HiggsTtsState:
             engine_time_s=data.get("engine_time_s", 0.0),
             audio_samples=data.get("audio_samples"),
             sample_rate=data.get("sample_rate", 24000),
+            output_token_logprobs=data.get("output_token_logprobs"),
         )
 
 

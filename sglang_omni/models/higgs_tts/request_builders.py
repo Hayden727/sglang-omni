@@ -153,6 +153,9 @@ def apply_higgs_result(state: HiggsTtsState, data: HiggsSGLangRequestData) -> No
     else:
         state.output_codes_delayed = None
     state.prompt_tokens = len(data.input_ids)
+    state.output_token_logprobs = (
+        list(data.output_token_logprobs) if data.output_token_logprobs else None
+    )
 
 
 def make_higgs_scheduler_adapters(
@@ -176,6 +179,8 @@ def make_higgs_scheduler_adapters(
                 int(max_new_tokens_cap),
             )
         data = build_sglang_higgs_request(state, request_id=payload.request_id)
+        _params = payload.request.params if isinstance(payload.request.params, dict) else {}
+        data.return_logprob = bool(_params.get("return_logprob"))
         data.engine_start_s = _perf_counter()
         data.stage_payload = payload
         data.stream_metadata = build_higgs_stream_metadata(payload, data)
