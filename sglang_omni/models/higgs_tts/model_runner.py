@@ -306,8 +306,10 @@ class HiggsTTSModelRunner(ModelRunner):
                 continue
             codes_N = codes_BN_cpu[b].to(torch.long).clone()
             data.output_codes.append(codes_N)
-            nt = getattr(result.logits_output, "next_token_logits", None)
-            self._record_rollout_logprob(data, nt[b] if nt is not None else None, int(codes_N[0].item()))
+            lpv = getattr(self.model, "_step_cb0_logprob", None)
+            self._record_rollout_logprob(
+                data, lpv[b] if lpv is not None else None, int(codes_N[0].item())
+            )
             data.generation_done = bool(gen_done_after_cpu[b])
             self._emit_code_chunk(sched_req, codes_N)
             self._mark_sampler_finished(req, data.generation_done)
@@ -384,8 +386,10 @@ class HiggsTTSModelRunner(ModelRunner):
                 continue
             codes_N = codes_log[-1]
             data.output_codes.append(codes_N.detach().cpu().clone())
-            nt = getattr(result.logits_output, "next_token_logits", None)
-            self._record_rollout_logprob(data, nt[b] if nt is not None else None, int(codes_N[0].item()))
+            lpv = getattr(self.model, "_step_cb0_logprob", None)
+            self._record_rollout_logprob(
+                data, lpv[b] if lpv is not None else None, int(codes_N[0].item())
+            )
             data.generation_done = bool(model._sampler_pool.generation_done[row].item())
             self._emit_code_chunk(sched_req, data.output_codes[-1])
             self._mark_sampler_finished(req, data.generation_done)
@@ -404,15 +408,16 @@ class HiggsTTSModelRunner(ModelRunner):
             req.finished_reason = FINISH_MATCHED_TOKEN(EOC_ID)
 
     @staticmethod
-    def _record_rollout_logprob(data, logits_row, cb0_token):
-        """Record codebook-0 codec token + its logprob for RL rollout."""
+    def _record_rollout_logprob(data, cb0_logprob, cb0_token):
+        """Record a sampled codebook-0 codec token + its log-prob for RL rollout.
+
+        ``cb0_logprob`` is the model's pre-computed codebook-0 log-prob of the sampled
+        token (the true behavior-policy logprob); ``None`` falls back to 0.0.
+        """
         if not getattr(data, "return_logprob", False):
             return
-        if logits_row is None:
-            data.output_token_logprobs.append([0.0, int(cb0_token)])
-            return
-        logp = torch.log_softmax(logits_row.float(), dim=-1)
-        data.output_token_logprobs.append([float(logp[int(cb0_token)].item()), int(cb0_token)])
+        lp = 0.0 if cb0_logprob is None else float(cb0_logprob)
+        data.output_token_logprobs.append([lp, int(cb0_token)])
 
     def _emit_code_chunk(self, sched_req: Any, codes_N: torch.Tensor) -> None:
         if self._outbox is None:

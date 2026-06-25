@@ -185,6 +185,12 @@ class HiggsTTSModel(nn.Module):
         self._cg_codes_BN = torch.zeros(
             pool_size, num_codebooks, dtype=torch.long, device=cg_device
         )
+        # Per-row codebook-0 log-prob of the sampled token, for RL rollout. Written
+        # in-place each step (eager prefill + CUDA-graph decode) so the runner records
+        # the true behavior-policy logprob instead of a text-vocab placeholder.
+        self._step_cb0_logprob = torch.zeros(
+            pool_size, dtype=torch.float32, device=cg_device
+        )
         # Note(Jiaxin): Packs codes_BN | was_done | active_generation_done into one buffer.
         self._cg_collect_staging = torch.zeros(
             pool_size, num_codebooks + 2, dtype=torch.long, device=cg_device
@@ -338,6 +344,13 @@ class HiggsTTSModel(nn.Module):
         # Note(yichi): One D2H per step to skip STOP-sentinel rows in the Python append loop.
         was_done_cpu = was_done.cpu().tolist()
         codes_BN = codes_BN.detach().to(torch.long)
+
+        # Codebook-0 log-prob of each sampled token, for RL rollout. Indexed by
+        # forward-batch row (aligned with the runner's per-request collect loop).
+        cb0_logits = logits_BNV[:, 0, :]
+        cb0_idx = codes_BN[:, 0:1].clamp(0, cb0_logits.shape[-1] - 1)
+        cb0_lp = torch.log_softmax(cb0_logits, dim=-1).gather(1, cb0_idx).squeeze(1)
+        self._step_cb0_logprob[:batch_size] = cb0_lp
         for b in range(batch_size):
             if was_done_cpu[b]:
                 continue
@@ -403,6 +416,13 @@ class HiggsTTSModel(nn.Module):
         self._cg_active_generation_done[:batch_size] = new_generation_done_B
         self._cg_active_last_codes[:batch_size] = new_last_codes_BN
         self._cg_codes_BN[:batch_size] = codes_BN
+
+        # Codebook-0 log-prob of each sampled token, for RL rollout. In-place buffer
+        # write (no value-dependent control flow / D2H) keeps this CUDA-graph safe.
+        cb0_logits = logits_BNV[:, 0, :]
+        cb0_idx = codes_BN[:, 0:1].long().clamp(0, cb0_logits.shape[-1] - 1)
+        cb0_lp = torch.log_softmax(cb0_logits, dim=-1).gather(1, cb0_idx).squeeze(1)
+        self._step_cb0_logprob[:batch_size] = cb0_lp
 
         text_vocab_size = self.backbone.config.vocab_size
         return torch.zeros(
