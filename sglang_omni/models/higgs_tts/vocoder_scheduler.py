@@ -199,9 +199,20 @@ class HiggsStreamingVocoderScheduler(StreamingSimpleScheduler):
         usage = self._build_usage(HiggsTtsState.from_dict(payload.data))
         if usage is not None:
             final_data["usage"] = usage
-        _lp = payload.data.get("output_token_logprobs") if isinstance(payload.data, dict) else None
+        _lp = (
+            payload.data.get("output_token_logprobs")
+            if isinstance(payload.data, dict)
+            else None
+        )
         if _lp is not None:
             final_data["output_token_logprobs"] = _lp
+        _codes = (
+            payload.data.get("output_codes_delayed")
+            if isinstance(payload.data, dict)
+            else None
+        )
+        if _codes is not None:
+            final_data["output_codebook_tokens"] = _codes
         messages.append(
             OutgoingMessage(
                 request_id=request_id,
@@ -490,6 +501,8 @@ class HiggsStreamingVocoderScheduler(StreamingSimpleScheduler):
             data["usage"] = usage
         if state.output_token_logprobs is not None:
             data["output_token_logprobs"] = state.output_token_logprobs
+        if state.output_codes_delayed is not None:
+            data["output_codebook_tokens"] = state.output_codes_delayed
         payload.data = data
         return payload
 
